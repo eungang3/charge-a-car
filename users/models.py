@@ -22,6 +22,6 @@ class UserCoupon(models.Model):
 class Card(TimeStampModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     customer_uid = models.CharField(max_length=250, unique=True)
-    pay_day = models.DateField(null=True)
+    pay_day = models.IntegerField(null=True)
     class Meta:
         db_table = 'cards'
