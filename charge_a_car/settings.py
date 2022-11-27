@@ -151,3 +151,21 @@ CORS_ALLOW_HEADERS = (
 pymysql.install_as_MySQLdb()
 
 IAMPORT_CONFIG = IAMPORT_CONFIG
+
+LOGGING = {
+    'disable_existing_loggers': False,
+    'version': 1,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'level': 'DEBUG',
+        },
+    },
+    'loggers': {
+        'django.db.backends': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}

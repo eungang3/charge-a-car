@@ -6,6 +6,7 @@ from django.http import JsonResponse
 from django.views import View
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Sum
 
 from users.models import User, Card 
 from coupons.models import Coupon
@@ -162,10 +163,48 @@ class Pay:
     def pay_later_execute(self):
         if not self.pay_day:
             return JsonResponse({"message":"필수값이 없습니다."}, status=401)
-            
-        pending_orders = Order.objects\
+
+        total_by_card_ids = Order.objects\
             .select_related('card')\
-            .filter(status='pending', name='후불결제', card__pay_day=self.pay_day)
+            .filter(status='pending', name='후불결제', card__pay_day=self.pay_day)\
+            .values('card_id')\
+            .annotate(total_amount=Sum('actual_amount'))
+
+        for total_by_card_id in total_by_card_ids:
+            merchant_uid = str(uuid.uuid4())
+
+            payment = Payment.objects.create(
+                merchant_uid = merchant_uid,
+                status = 'ready',
+                amount = total_by_card_id.total_amount
+            )
+
+            customer_uid = Card.objects.get(id=total_by_card_id.card_id).customer_uid
+            access_token = self.iamport.get_access_token()
+            imp_uid = self.iamport.make_payment(access_token, customer_uid, merchant_uid, self.actual_amount, self.name)
+            
+            if not imp_uid:
+                return JsonResponse({"message":"결제에 실패했습니다."}, status=401)
+
+            paid_amount = self.iamport.get_paid_amount(self, access_token, imp_uid)
+
+            if paid_amount == total_by_card_id.total_amount:
+                payment.imp_uid = imp_uid
+                payment.status = 'paid'
+                payment.save()
+
+                pending_orders = Order.objects\
+                    .select_related('card')\
+                    .filter(status='pending', name='후불결제', card__pay_day=self.pay_day, card_id=total_by_card_id.card_id)
+                
+                for order in pending_orders:
+                    order.payment_id = payment.id
+                    order.status = 'paid'
+                    order.save()
+            else:
+                return JsonResponse({"message":"결제 금액이 요청과 일치하지 않습니다."}, status=401)
+        
+        return JsonResponse({"message":"결제 성공"}, status=201)
     
 class PayView(View):
     def post(self, request):
@@ -195,4 +234,5 @@ class PayView(View):
         elif name == "선불금사용":
             payment.pay_with_balance()
 
-        return JsonResponse({"message" : '유효하지 않은 name입니다.'}, status=401)
+        else:
+            return JsonResponse({"message" : '유효하지 않은 name입니다.'}, status=401)
